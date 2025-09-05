@@ -11,6 +11,14 @@ class TrainConfig:
     seed: int = 42
     # 并行评估：最大并行进程数（<=1 表示禁用并行）
     max_workers: int = 0
+    # GPU 配置
+    use_gpu: bool = True
+    gpu_device: str = 'cuda'
+    dt: float = 0.02
+    # 批并行/规模（GPU/CPU通用）
+    rs_batch_size: int = 32
+    pso_swarm_size: int = 24
+    ga_pop_size: int = 40
     # Search bounds for Problem 1 style single-bomb example
     # x = [t_release, det_delay(=t_detonate-t_release), u_speed]
     t_release_min: float = 0.5

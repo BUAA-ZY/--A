@@ -7,9 +7,10 @@ from .base import Optimizer, SearchSpace
 
 
 class RandomSearch(Optimizer):
-    def __init__(self, seed: int = 42):
+    def __init__(self, seed: int = 42, batch_size: int = 32):
         super().__init__(seed)
         self.rng = np.random.default_rng(self.seed)
+        self.batch_size = int(batch_size)
 
     def _sample(self, space: SearchSpace) -> List[float]:
         xs: List[float] = []
@@ -54,8 +55,8 @@ class RandomSearch(Optimizer):
             return self.optimize(evaluate_fn, search_space, max_steps, log_callback)
         best_val = float('-inf')
         best_x: List[float] = []
-        # 以批 32 进行评估
-        batch_size = 32
+        # 批量评估（可由 train 配置覆盖）
+        batch_size = max(1, int(self.batch_size))
         steps_done = 0
         while steps_done < max_steps:
             cur = min(batch_size, max_steps - steps_done)

@@ -13,6 +13,7 @@ from algorithms import get_optimizer
 from algorithms.base import SearchSpace
 from scenarios import Problem1, Problem2, Problem3, Problem4, Problem5
 from physics.simulation import simulate_single_bomb, simulate_multi_bombs
+from physics.sim_torch import eval_problem2_batch_torch, eval_problem3_batch_torch
 from physics.types import BombEvent, CylinderTarget
 from .config import TrainConfig
 def _evaluate_worker(args):
@@ -273,6 +274,24 @@ class Trainer:
 
         # 并行批评估包装
         def batch_evaluate_fn(xs):
+            # GPU 优先，其次多进程，最后串行
+            if self.cfg.use_gpu:
+                if isinstance(self.scenario, Problem2):
+                    st = self.scenario.initial_states()
+                    vals = eval_problem2_batch_torch(
+                        xs, m0=st['m0'], u0=st['u0'], true_target_center=(st['true_target'].center[0], st['true_target'].center[1], st['true_target'].center[2] + st['true_target'].height/2.0),
+                        t_max=st['t_max'], dt=self.cfg.dt, device=self.cfg.gpu_device,
+                    )
+                    print(f"[Trainer] GPU batch evaluate: batch_size={len(xs)}, device={self.cfg.gpu_device}")
+                    return [float(v) for v in vals]
+                elif isinstance(self.scenario, Problem3):
+                    st = self.scenario.initial_states()
+                    vals = eval_problem3_batch_torch(
+                        xs, m0=st['m0'], u0=st['u0'], true_target_center=(st['true_target'].center[0], st['true_target'].center[1], st['true_target'].center[2] + st['true_target'].height/2.0),
+                        t_max=st['t_max'], dt=self.cfg.dt, device=self.cfg.gpu_device,
+                    )
+                    print(f"[Trainer] GPU batch evaluate: batch_size={len(xs)}, device={self.cfg.gpu_device}")
+                    return [float(v) for v in vals]
             if self.cfg.max_workers and self.cfg.max_workers > 1:
                 from concurrent.futures import ProcessPoolExecutor
                 # Debug print: first few calls only
