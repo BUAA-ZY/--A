@@ -12,9 +12,78 @@ except Exception:
 from algorithms import get_optimizer
 from algorithms.base import SearchSpace
 from scenarios import Problem1, Problem2, Problem3, Problem4, Problem5
-from physics.simulation import simulate_single_bomb
+from physics.simulation import simulate_single_bomb, simulate_multi_bombs
 from physics.types import BombEvent, CylinderTarget
 from .config import TrainConfig
+def _evaluate_worker(args):
+    """Top-level worker for multiprocessing evaluation.
+
+    args = (scenario_key: str, x: Sequence[float])
+    Returns float objective value.
+    """
+    scenario_key, x = args
+    # Local imports inside worker for safety
+    from scenarios import Problem1, Problem2, Problem3
+    from physics.simulation import simulate_single_bomb, simulate_multi_bombs
+    from physics.types import BombEvent, CylinderTarget
+    import math
+
+    # Build scenario object and states
+    if scenario_key == 'problem1':
+        sc = Problem1()
+        st = sc.initial_states()
+        t_release = float(x[0])
+        det_delay = float(x[1])
+        u_speed = float(x[2])
+        bomb = BombEvent(t_release=t_release, t_detonate=t_release + det_delay)
+        res = simulate_single_bomb(m0=st['m0'], u0=st['u0'], heading_to_xy=st['heading_to_xy'], u_speed=u_speed, bomb=bomb, true_target=st['true_target'], t_max=st['t_max'])
+        return float(res.total_time)
+    elif scenario_key == 'problem2':
+        sc = Problem2()
+        st = sc.initial_states()
+        theta = float(x[0])
+        u_speed = float(x[1])
+        t_release = float(x[2])
+        det_delay = float(x[3])
+        u0 = st['u0']
+        dir_xy = (math.cos(theta), math.sin(theta))
+        heading_to = (u0[0] + dir_xy[0], u0[1] + dir_xy[1], 0.0)
+        bomb = BombEvent(t_release=t_release, t_detonate=t_release + det_delay)
+        res = simulate_single_bomb(m0=st['m0'], u0=u0, heading_to_xy=heading_to, u_speed=u_speed, bomb=bomb, true_target=st['true_target'], t_max=st['t_max'])
+        return float(res.total_time)
+    elif scenario_key == 'problem3':
+        sc = Problem3()
+        st = sc.initial_states()
+        theta = float(x[0])
+        u_speed = float(x[1])
+        u0 = st['u0']
+        dir_xy = (math.cos(theta), math.sin(theta))
+        heading_to = (u0[0] + dir_xy[0], u0[1] + dir_xy[1], 0.0)
+        bombs = [
+            BombEvent(t_release=float(x[2]), t_detonate=float(x[2]) + float(x[3])),
+            BombEvent(t_release=float(x[4]), t_detonate=float(x[4]) + float(x[5])),
+            BombEvent(t_release=float(x[6]), t_detonate=float(x[6]) + float(x[7])),
+        ]
+        tr = sorted([b.t_release for b in bombs])
+        ok = all(tr[i+1] - tr[i] >= 1.0 for i in range(len(tr) - 1))
+        if not ok:
+            return -1e6
+        res = simulate_multi_bombs(m0=st['m0'], u0=u0, heading_to_xy=heading_to, u_speed=u_speed, bombs=bombs, true_target=st['true_target'], t_max=st['t_max'])
+        return float(res.total_time)
+    else:
+        # Fallback use Problem2 parameterization
+        sc = Problem2()
+        st = sc.initial_states()
+        theta = float(x[0])
+        u_speed = float(x[1])
+        t_release = float(x[2])
+        det_delay = float(x[3])
+        u0 = st['u0']
+        dir_xy = (math.cos(theta), math.sin(theta))
+        heading_to = (u0[0] + dir_xy[0], u0[1] + dir_xy[1], 0.0)
+        bomb = BombEvent(t_release=t_release, t_detonate=t_release + det_delay)
+        res = simulate_single_bomb(m0=st['m0'], u0=u0, heading_to_xy=heading_to, u_speed=u_speed, bomb=bomb, true_target=st['true_target'], t_max=st['t_max'])
+        return float(res.total_time)
 
 
 def _get_scenario(name: str):
@@ -38,6 +107,8 @@ class Trainer:
         self.scenario = _get_scenario(cfg.scenario)
         self.OptimizerCls = get_optimizer(cfg.optimizer)
         self.writer = None
+        # 并行批评估调试计数
+        self._batch_debug_count = 0
         if SummaryWriter is not None:
             run_name = f"{cfg.scenario}_{cfg.optimizer}_seed{cfg.seed}"
             # Robust directory creation: avoid collisions with files
@@ -122,6 +193,61 @@ class Trainer:
         )
         return float(result.total_time)
 
+    # ---------------- Problem 3 ----------------
+    def _build_space_problem3(self) -> SearchSpace:
+        # x = [theta, u_speed, t_r1, d1, t_r2, d2, t_r3, d3]
+        names = [
+            "theta", "u_speed",
+            "t_release_1", "det_delay_1",
+            "t_release_2", "det_delay_2",
+            "t_release_3", "det_delay_3",
+        ]
+        b = [
+            (self.cfg.heading_min, self.cfg.heading_max),
+            (self.cfg.u_speed_min, self.cfg.u_speed_max),
+            (self.cfg.t_release_min, self.cfg.t_release_max),
+            (self.cfg.det_delay_min, self.cfg.det_delay_max),
+            (self.cfg.t_release_min, self.cfg.t_release_max),
+            (self.cfg.det_delay_min, self.cfg.det_delay_max),
+            (self.cfg.t_release_min, self.cfg.t_release_max),
+            (self.cfg.det_delay_min, self.cfg.det_delay_max),
+        ]
+        return SearchSpace(names=names, bounds=b)
+
+    def _evaluate_problem3(self, x: Sequence[float]) -> float:
+        st = self.scenario.initial_states()
+        import math
+        theta = float(x[0])
+        u_speed = float(x[1])
+        u0 = st['u0']
+        dir_xy = (math.cos(theta), math.sin(theta))
+        heading_to = (u0[0] + dir_xy[0], u0[1] + dir_xy[1], 0.0)
+        bombs = [
+            BombEvent(t_release=float(x[2]), t_detonate=float(x[2]) + float(x[3])),
+            BombEvent(t_release=float(x[4]), t_detonate=float(x[4]) + float(x[5])),
+            BombEvent(t_release=float(x[6]), t_detonate=float(x[6]) + float(x[7])),
+        ]
+        # Enforce min 1s interval (hard penalty)
+        tr = sorted([b.t_release for b in bombs])
+        ok = all(tr[i+1] - tr[i] >= 1.0 for i in range(len(tr) - 1))
+        if not ok:
+            return -1e6
+        res = simulate_multi_bombs(
+            m0=st['m0'], u0=u0, heading_to_xy=heading_to, u_speed=u_speed,
+            bombs=bombs, true_target=st['true_target'], t_max=st['t_max']
+        )
+        # Real-time print (trainer will call many times; keep concise)
+        # print(f"theta={theta:.3f}, u={u_speed:.1f}, total={res.total_time:.3f}")
+        if self.writer is not None:
+            # Detailed TB logs
+            import time as _time
+            step = int(_time.time())  # coarse wall-clock as global step
+            self.writer.add_scalar('q3/total_time', float(res.total_time), step)
+            for i, t in enumerate(res.per_bomb_times):
+                self.writer.add_scalar(f'q3/per_bomb_time_{i+1}', float(t), step)
+            self.writer.flush()
+        return float(res.total_time)
+
     def train(self):
         if isinstance(self.scenario, Problem1):
             space = self._build_space_problem1()
@@ -129,6 +255,9 @@ class Trainer:
         elif isinstance(self.scenario, Problem2):
             space = self._build_space_problem2()
             evaluator = self._evaluate_problem2
+        elif isinstance(self.scenario, Problem3):
+            space = self._build_space_problem3()
+            evaluator = self._evaluate_problem3
         else:
             # 暂用Problem2的参数空间作为占位
             space = self._build_space_problem2()
@@ -142,7 +271,30 @@ class Trainer:
                 for i, name in enumerate(space.names):
                     self.writer.add_scalar(f'params/{name}', float(x[i]), step)
 
-        best_val, best_x = opt.optimize(evaluate_fn=evaluator, search_space=space, max_steps=self.cfg.steps, log_callback=log_callback)
+        # 并行批评估包装
+        def batch_evaluate_fn(xs):
+            if self.cfg.max_workers and self.cfg.max_workers > 1:
+                from concurrent.futures import ProcessPoolExecutor
+                # Debug print: first few calls only
+                self._batch_debug_count += 1
+                if self._batch_debug_count <= 3:
+                    print(f"[Trainer] Parallel batch evaluate: batch_size={len(xs)}, max_workers={self.cfg.max_workers}")
+                scenario_key = self.cfg.scenario.lower().strip()
+                payloads = [(scenario_key, list(x)) for x in xs]
+                with ProcessPoolExecutor(max_workers=self.cfg.max_workers) as ex:
+                    vals = list(ex.map(_evaluate_worker, payloads))
+                return [float(v) for v in vals]
+            else:
+                return [float(evaluator(x)) for x in xs]
+
+        # 优先调用支持批评估的接口
+        try:
+            best_val, best_x = opt.optimize_batch(
+                evaluate_fn=evaluator, search_space=space, max_steps=self.cfg.steps,
+                batch_evaluate_fn=batch_evaluate_fn, log_callback=log_callback,
+            )
+        except Exception:
+            best_val, best_x = opt.optimize(evaluate_fn=evaluator, search_space=space, max_steps=self.cfg.steps, log_callback=log_callback)
         if self.writer is not None:
             for i, name in enumerate(space.names):
                 self.writer.add_scalar(f'best/{name}', float(best_x[i]), 0)

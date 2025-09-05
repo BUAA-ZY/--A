@@ -42,4 +42,34 @@ class RandomSearch(Optimizer):
                 log_callback(step, val, x)
         return best_val, best_x
 
+    def optimize_batch(
+        self,
+        evaluate_fn: Callable[[Sequence[float]], float],
+        search_space: SearchSpace,
+        max_steps: int,
+        batch_evaluate_fn: Callable[[Sequence[Sequence[float]]], List[float]] | None = None,
+        log_callback: Callable[[int, float, Sequence[float]], None] | None = None,
+    ) -> Tuple[float, List[float]]:
+        if batch_evaluate_fn is None:
+            return self.optimize(evaluate_fn, search_space, max_steps, log_callback)
+        best_val = float('-inf')
+        best_x: List[float] = []
+        # 以批 32 进行评估
+        batch_size = 32
+        steps_done = 0
+        while steps_done < max_steps:
+            cur = min(batch_size, max_steps - steps_done)
+            xs = [self._sample(search_space) for _ in range(cur)]
+            vals = batch_evaluate_fn(xs)
+            for i in range(cur):
+                val = float(vals[i])
+                x = xs[i]
+                if val > best_val:
+                    best_val = val
+                    best_x = list(x)
+                if log_callback is not None:
+                    log_callback(steps_done + i, val, x)
+            steps_done += cur
+        return best_val, best_x
+
 

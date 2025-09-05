@@ -37,4 +37,15 @@ class Optimizer(abc.ABC):
         """
         raise NotImplementedError
 
+    # 可选：批量评估接口（默认逐一调用 evaluate_fn）
+    def optimize_batch(
+        self,
+        evaluate_fn: Callable[[Sequence[float]], float],
+        search_space: SearchSpace,
+        max_steps: int,
+        batch_evaluate_fn: Callable[[Sequence[Sequence[float]]], List[float]] | None = None,
+        log_callback: Callable[[int, float, Sequence[float]], None] | None = None,
+    ) -> Tuple[float, List[float]]:
+        return self.optimize(evaluate_fn, search_space, max_steps, log_callback)
+
 

@@ -50,3 +50,12 @@ class SimulationResult:
     cloud_track: List[Tuple[float, Vec3]]  # (t, center)
 
 
+@dataclass
+class MultiSimulationResult:
+    total_time: float
+    union_intervals: List[ObscurationInterval]
+    per_bomb_times: List[float]
+    per_bomb_intervals: List[List[ObscurationInterval]]
+    cloud_tracks: List[List[Tuple[float, Vec3]]]
+
+

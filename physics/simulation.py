@@ -5,7 +5,7 @@ from typing import Callable, List, Optional, Tuple
 from .constants import CLOUD_EFFECTIVE_SECONDS, CLOUD_RADIUS, CLOUD_SINK_RATE, DEFAULT_DT
 from .dynamics import missile_state_at, uav_state_at, bomb_state_after_release, cloud_center_at
 from .occlusion import is_obscured_by_sphere, sample_target_points
-from .types import BombEvent, CylinderTarget, SimulationResult, Vec3, ObscurationInterval
+from .types import BombEvent, CylinderTarget, SimulationResult, Vec3, ObscurationInterval, MultiSimulationResult
 
 
 def simulate_single_bomb(
@@ -100,5 +100,55 @@ def simulate_single_bomb(
 
     total = sum(max(0.0, iv.t1 - iv.t0) for iv in intervals)
     return SimulationResult(total_time=total, obscured_intervals=intervals, cloud_track=cloud_track)
+
+
+def _merge_intervals(bins: List[List[ObscurationInterval]]) -> List[ObscurationInterval]:
+    pts: List[Tuple[float, int]] = []
+    for ivs in bins:
+        for iv in ivs:
+            pts.append((iv.t0, +1))
+            pts.append((iv.t1, -1))
+    if not pts:
+        return []
+    pts.sort()
+    res: List[ObscurationInterval] = []
+    acc = 0
+    start = None
+    for t, d in pts:
+        prev = acc
+        acc += d
+        if prev <= 0 and acc > 0:
+            start = t
+        elif prev > 0 and acc <= 0 and start is not None:
+            res.append(ObscurationInterval(start, t))
+            start = None
+    return res
+
+
+def simulate_multi_bombs(
+    m0: Vec3,
+    u0: Vec3,
+    heading_to_xy: Vec3,
+    u_speed: float,
+    bombs: List[BombEvent],
+    true_target: CylinderTarget,
+    t_max: float,
+    dt: float = DEFAULT_DT,
+) -> MultiSimulationResult:
+    per_intervals: List[List[ObscurationInterval]] = []
+    per_times: List[float] = []
+    cloud_tracks: List[List[Tuple[float, Vec3]]] = []
+
+    for b in bombs:
+        res = simulate_single_bomb(
+            m0=m0, u0=u0, heading_to_xy=heading_to_xy, u_speed=u_speed, bomb=b, true_target=true_target, t_max=t_max, dt=dt
+        )
+        per_intervals.append(res.obscured_intervals)
+        per_times.append(res.total_time)
+        cloud_tracks.append(res.cloud_track)
+
+    union = _merge_intervals(per_intervals)
+    total = sum(max(0.0, iv.t1 - iv.t0) for iv in union)
+    return MultiSimulationResult(total_time=total, union_intervals=union, per_bomb_times=per_times, per_bomb_intervals=per_intervals, cloud_tracks=cloud_tracks)
 
 

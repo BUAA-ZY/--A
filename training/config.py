@@ -9,6 +9,8 @@ class TrainConfig:
     steps: int = 200
     log_dir: str = "runs"
     seed: int = 42
+    # 并行评估：最大并行进程数（<=1 表示禁用并行）
+    max_workers: int = 0
     # Search bounds for Problem 1 style single-bomb example
     # x = [t_release, det_delay(=t_detonate-t_release), u_speed]
     t_release_min: float = 0.5
@@ -20,5 +22,7 @@ class TrainConfig:
     # Problem 2 adds heading angle theta (rad)
     heading_min: float = -3.141592653589793
     heading_max: float = 3.141592653589793
+    # Problem 3: FY1三弹（统一航向/速度），决策变量为 [theta, u_speed, t_release1, det_delay1, t_release2, det_delay2, t_release3, det_delay3]
+    # 可直接复用 Problem2 的范围；如需更紧的约束可再细化。
 
 
