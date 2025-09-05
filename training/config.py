@@ -17,5 +17,8 @@ class TrainConfig:
     det_delay_max: float = 6.0
     u_speed_min: float = 70.0
     u_speed_max: float = 140.0
+    # Problem 2 adds heading angle theta (rad)
+    heading_min: float = -3.141592653589793
+    heading_max: float = 3.141592653589793
 
 

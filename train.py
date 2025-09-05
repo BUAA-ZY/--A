@@ -16,8 +16,8 @@ from training import TrainConfig, Trainer
 def build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser()
     p.add_argument('--scenario', type=str, default='problem1')
-    p.add_argument('--optimizer', type=str, default='random_search')
-    p.add_argument('--steps', type=int, default=200)
+    p.add_argument('--optimizer', type=str, default='hill_climb')
+    p.add_argument('--steps', type=int, default=1000)
     p.add_argument('--log_dir', type=str, default='runs')
     p.add_argument('--seed', type=int, default=42)
     # Bounds

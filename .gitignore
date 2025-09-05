@@ -1,9 +1,0 @@
-# 忽略 Excel 临时文件（Windows 在编辑时生成的 ~${filename} 的文件）
-~$*.xlsx
-# 其他常见临时文件
-.idea/
-.vscode/
-*.log
-*.tmp
-
-

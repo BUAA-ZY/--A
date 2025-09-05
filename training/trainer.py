@@ -40,7 +40,36 @@ class Trainer:
         self.writer = None
         if SummaryWriter is not None:
             run_name = f"{cfg.scenario}_{cfg.optimizer}_seed{cfg.seed}"
-            self.writer = SummaryWriter(os.path.join(cfg.log_dir, run_name))
+            # Robust directory creation: avoid collisions with files
+            import tempfile
+            import time as _time
+
+            def _ensure_dir(path: str) -> str:
+                if os.path.exists(path):
+                    if os.path.isdir(path):
+                        return path
+                    # path exists as a file -> try rename with suffix
+                    parent = os.path.dirname(path) or "."
+                    base = os.path.basename(path)
+                    for suffix in ["_tb", "_tb2", f"_tb_{int(_time.time())}"]:
+                        candidate = os.path.join(parent, base + suffix)
+                        if not os.path.exists(candidate):
+                            os.makedirs(candidate, exist_ok=True)
+                            return candidate
+                    # fallback to temp dir
+                    return tempfile.mkdtemp(prefix="runs_", dir=parent)
+                else:
+                    os.makedirs(path, exist_ok=True)
+                    return path
+
+            try:
+                base_dir = _ensure_dir(self.cfg.log_dir)
+                run_dir = os.path.join(base_dir, run_name)
+                run_dir = _ensure_dir(run_dir)
+                self.writer = SummaryWriter(run_dir)
+            except Exception:
+                # Disable writer but keep training running
+                self.writer = None
 
     def _build_space_problem1(self) -> SearchSpace:
         names = ["t_release", "det_delay", "u_speed"]
@@ -63,14 +92,47 @@ class Trainer:
         )
         return float(result.total_time)
 
+    # ---------------- Problem 2 ----------------
+    def _build_space_problem2(self) -> SearchSpace:
+        names = ["theta", "u_speed", "t_release", "det_delay"]
+        bounds = [
+            (self.cfg.heading_min, self.cfg.heading_max),
+            (self.cfg.u_speed_min, self.cfg.u_speed_max),
+            (self.cfg.t_release_min, self.cfg.t_release_max),
+            (self.cfg.det_delay_min, self.cfg.det_delay_max),
+        ]
+        return SearchSpace(names=names, bounds=bounds)
+
+    def _evaluate_problem2(self, x: Sequence[float]) -> float:
+        st = self.scenario.initial_states()
+        theta = float(x[0])
+        u_speed = float(x[1])
+        t_release = float(x[2])
+        det_delay = float(x[3])
+        # Build heading target in XY from theta wrt UAV initial position
+        u0 = st['u0']
+        # Unit vector at angle theta
+        import math
+        dir_xy = (math.cos(theta), math.sin(theta))
+        heading_to = (u0[0] + dir_xy[0], u0[1] + dir_xy[1], 0.0)
+        bomb = BombEvent(t_release=t_release, t_detonate=t_release + det_delay)
+        result = simulate_single_bomb(
+            m0=st['m0'], u0=u0, heading_to_xy=heading_to, u_speed=u_speed,
+            bomb=bomb, true_target=st['true_target'], t_max=st['t_max']
+        )
+        return float(result.total_time)
+
     def train(self):
         if isinstance(self.scenario, Problem1):
             space = self._build_space_problem1()
             evaluator = self._evaluate_problem1
+        elif isinstance(self.scenario, Problem2):
+            space = self._build_space_problem2()
+            evaluator = self._evaluate_problem2
         else:
-            # Placeholder: reuse problem1 evaluator and space as a starting point
-            space = self._build_space_problem1()
-            evaluator = self._evaluate_problem1
+            # 暂用Problem2的参数空间作为占位
+            space = self._build_space_problem2()
+            evaluator = self._evaluate_problem2
 
         opt = self.OptimizerCls(seed=self.cfg.seed)
 
