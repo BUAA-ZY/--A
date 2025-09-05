@@ -16,6 +16,23 @@ from physics.simulation import simulate_single_bomb, simulate_multi_bombs
 from physics.sim_torch import eval_problem2_batch_torch, eval_problem3_batch_torch
 from physics.types import BombEvent, CylinderTarget
 from .config import TrainConfig
+
+
+def _get_scenario(name: str):
+    key = name.lower().strip()
+    if key == 'problem1':
+        return Problem1()
+    if key == 'problem2':
+        return Problem2()
+    if key == 'problem3':
+        return Problem3()
+    if key == 'problem4':
+        return Problem4()
+    if key == 'problem5':
+        return Problem5()
+    raise KeyError(f"Unknown scenario: {name}")
+
+
 def _evaluate_worker(args):
     """Top-level worker for multiprocessing evaluation.
 
@@ -87,26 +104,20 @@ def _evaluate_worker(args):
         return float(res.total_time)
 
 
-def _get_scenario(name: str):
-    key = name.lower().strip()
-    if key == 'problem1':
-        return Problem1()
-    if key == 'problem2':
-        return Problem2()
-    if key == 'problem3':
-        return Problem3()
-    if key == 'problem4':
-        return Problem4()
-    if key == 'problem5':
-        return Problem5()
-    raise KeyError(f"Unknown scenario: {name}")
-
-
 class Trainer:
     def __init__(self, cfg: TrainConfig):
         self.cfg = cfg
         self.scenario = _get_scenario(cfg.scenario)
-        self.OptimizerCls = get_optimizer(cfg.optimizer)
+        # 依据配置构建优化器（注入批规模）
+        OptimizerCls = get_optimizer(cfg.optimizer)
+        if cfg.optimizer.lower() == 'random_search':
+            self.optimizer = OptimizerCls(seed=cfg.seed, batch_size=cfg.rs_batch_size)
+        elif cfg.optimizer.lower() == 'pso':
+            self.optimizer = OptimizerCls(seed=cfg.seed, swarm_size=cfg.pso_swarm_size)
+        elif cfg.optimizer.lower() == 'ga':
+            self.optimizer = OptimizerCls(seed=cfg.seed, pop_size=cfg.ga_pop_size)
+        else:
+            self.optimizer = OptimizerCls(seed=cfg.seed)
         self.writer = None
         # 并行批评估调试计数
         self._batch_debug_count = 0
@@ -237,8 +248,6 @@ class Trainer:
             m0=st['m0'], u0=u0, heading_to_xy=heading_to, u_speed=u_speed,
             bombs=bombs, true_target=st['true_target'], t_max=st['t_max']
         )
-        # Real-time print (trainer will call many times; keep concise)
-        # print(f"theta={theta:.3f}, u={u_speed:.1f}, total={res.total_time:.3f}")
         if self.writer is not None:
             # Detailed TB logs
             import time as _time
@@ -263,14 +272,6 @@ class Trainer:
             # 暂用Problem2的参数空间作为占位
             space = self._build_space_problem2()
             evaluator = self._evaluate_problem2
-
-        opt = self.OptimizerCls(seed=self.cfg.seed)
-
-        def log_callback(step: int, val: float, x: Sequence[float]):
-            if self.writer is not None:
-                self.writer.add_scalar('objective/obscuration_time', val, step)
-                for i, name in enumerate(space.names):
-                    self.writer.add_scalar(f'params/{name}', float(x[i]), step)
 
         # 并行批评估包装
         def batch_evaluate_fn(xs):
@@ -306,19 +307,27 @@ class Trainer:
             else:
                 return [float(evaluator(x)) for x in xs]
 
-        # 优先调用支持批评估的接口
+        opt = self.optimizer
         try:
             best_val, best_x = opt.optimize_batch(
                 evaluate_fn=evaluator, search_space=space, max_steps=self.cfg.steps,
-                batch_evaluate_fn=batch_evaluate_fn, log_callback=log_callback,
+                batch_evaluate_fn=batch_evaluate_fn, log_callback=self._tb_log(space),
             )
         except Exception:
-            best_val, best_x = opt.optimize(evaluate_fn=evaluator, search_space=space, max_steps=self.cfg.steps, log_callback=log_callback)
+            best_val, best_x = opt.optimize(evaluate_fn=evaluator, search_space=space, max_steps=self.cfg.steps, log_callback=self._tb_log(space))
         if self.writer is not None:
             for i, name in enumerate(space.names):
                 self.writer.add_scalar(f'best/{name}', float(best_x[i]), 0)
             self.writer.add_scalar('best/obscuration_time', best_val, 0)
             self.writer.flush()
         return best_val, best_x
+
+    def _tb_log(self, space: SearchSpace):
+        def log_callback(step: int, val: float, x: Sequence[float]):
+            if self.writer is not None:
+                self.writer.add_scalar('objective/obscuration_time', val, step)
+                for i, name in enumerate(space.names):
+                    self.writer.add_scalar(f'params/{name}', float(x[i]), step)
+        return log_callback
 
 

@@ -30,7 +30,7 @@ def build_argparser() -> argparse.ArgumentParser:
     # 批并行规模（GPU/CPU）
     p.add_argument('--rs_batch_size', type=int, default=32, help='RandomSearch批大小')
     p.add_argument('--pso_swarm_size', type=int, default=24, help='PSO粒子数量')
-    p.add_argument('--ga_pop_size', type=int, default=40, help='GA种群大小')
+    p.add_argument('--ga_pop_size', type=int, default=256, help='GA种群大小')
     # Bounds
     p.add_argument('--t_release_min', type=float, default=0.5)
     p.add_argument('--t_release_max', type=float, default=5.0)
